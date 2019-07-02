@@ -41,7 +41,7 @@
 #define DEFAULT_CWIDTH 20 /* 20 MHz channels by default */
 
 #define NB_PWR 5 /* size of signal power ring buffer */
-#define NB_PRB 10 /* size of probed ESSID ring buffer */
+#define NB_PRB 1000 /* size of probed ESSID ring buffer */
 
 #define MAX_CARDS 8 /* maximum number of cards to capture from */
 
@@ -103,18 +103,20 @@ char *
 get_manufacturer(unsigned char mac0, unsigned char mac1, unsigned char mac2);
 
 #define AIRODUMP_NG_CSV_EXT "csv"
+#define AIRODUMP_NG_JSON_EXT "json"
 #define KISMET_CSV_EXT "kismet.csv"
 #define KISMET_NETXML_EXT "kismet.netxml"
 #define AIRODUMP_NG_GPS_EXT "gps"
 #define AIRODUMP_NG_CAP_EXT "cap"
 #define AIRODUMP_NG_LOG_CSV_EXT "log.csv"
 
-#define NB_EXTENSIONS 7
+#define NB_EXTENSIONS 8
 
 const unsigned char llcnull[4] = {0, 0, 0, 0};
 char * f_ext[NB_EXTENSIONS] = {AIRODUMP_NG_CSV_EXT,
 							   AIRODUMP_NG_GPS_EXT,
 							   AIRODUMP_NG_CAP_EXT,
+                 AIRODUMP_NG_JSON_EXT,                               
 							   IVS2_EXTENSION,
 							   KISMET_CSV_EXT,
 							   KISMET_NETXML_EXT,
@@ -379,7 +381,8 @@ struct globals
 
 	int f_index; /* outfiles index       */
 	FILE * f_txt; /* output csv file      */
-	FILE * f_kis; /* output kismet csv file      */
+	FILE * f_json; /* output json file      */
+  FILE * f_kis; /* output kismet csv file      */
 	FILE * f_kis_xml; /* output kismet netxml file */
 	FILE * f_gps; /* output gps file      */
 	FILE * f_cap; /* output cap file      */
@@ -489,6 +492,7 @@ struct globals
 
 	int output_format_pcap;
 	int output_format_csv;
+  int output_format_json;    
 	int output_format_kismet_csv;
 	int output_format_kismet_netxml;
 	int output_format_log_csv;
