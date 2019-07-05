@@ -92,6 +92,44 @@ GCRY_THREAD_OPTION_PTHREAD_IMPL;
 static void dump_sort(void);
 static void dump_print(int ws_row, int ws_col, int if_num);
 
+
+/**
+ * The replace function
+ *
+ * Searches all of the occurrences using recursion
+ * and replaces with the given string
+ * @param char * o_string The original string
+ * @param char * s_string The string to search for
+ * @param char * r_string The replace string
+ * @return void The o_string passed is modified
+ */
+void replace(char * o_string, const char * s_string, char * r_string) {
+    //a buffer variable to do all replace things
+    char buffer[DB_QUERY_LEN];
+    //to store the pointer returned from strstr
+    char * ch;
+ 
+    //first exit condition
+    if(!(ch = strstr(o_string, s_string)))
+        return;
+ 
+    //copy all the content to buffer before the first occurrence of the search string
+    strncpy(buffer, o_string, ch-o_string);
+ 
+    //prepare the buffer for appending by adding a null to the end of it
+    buffer[ch-o_string] = 0;
+ 
+    //append using sprintf function
+    sprintf(buffer+(ch - o_string), "%s%s", r_string, ch + strlen(s_string));
+ 
+    //empty o_string for copying
+    o_string[0] = 0;
+    strcpy(o_string, buffer);
+    //pass recursively to replace other occurrences
+    return replace(o_string, s_string, r_string);
+}
+
+
 static char * get_manufacturer_from_string(char * buffer)
 {
 	char * manuf = NULL;
@@ -722,7 +760,7 @@ char usage[] =
 	"      --wps                 : Display WPS information (if any)\n"
 	"      --output-format\n"
 	"                  <formats> : Output format. Possible values:\n"
-	"                              pcap, ivs, csv, gps, json, kismet, netxml, "
+	"                              pcap, ivs, csv, gps, json, mysql, kismet, netxml, "
 	"logcsv\n"
 	"      --ignore-negative-one : Removes the message that says\n"
 	"                              fixed channel <interface>: -1\n"
@@ -1069,9 +1107,30 @@ static int dump_initialize(char * prefix, int ivs_only)
 			free(ofn);
 			return (1);
 		}
+    free(ofn);    
 	}
 
-  
+ 
+	/* Create mysql connection */
+	if (G.output_format_mysql)
+	{
+      G.f_mysql = mysql_init(NULL);
+      if (G.f_mysql == NULL) {
+          fprintf(stderr, "Could not create MySQL connection: %s\n", mysql_error(G.f_mysql));
+          G.f_mysql = NULL;
+          return (1);
+      }
+
+      /* Connect to the server */
+      if (!mysql_real_connect(G.f_mysql, DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT, NULL, 0)) {
+          fprintf(stderr, "Could not connect to MySQL server: %s\n", mysql_error(G.f_mysql));
+          G.f_mysql = NULL;
+          return (1);
+      }
+
+	}
+
+
 	/* create the output packet capture file */
 	if (G.output_format_pcap)
 	{
@@ -4633,7 +4692,7 @@ int dump_write_json( void )
             if( st_cur->ssid_length[i] == 0 )
                 continue;
 
-            temp = format_text_for_csv(st_cur->probes[i], st_cur->ssid_length[i]);
+            temp = format_text_for_csv( (unsigned char *) st_cur->probes[i], st_cur->ssid_length[i]);
 
             if( probes_written == 0)
             {
@@ -4672,6 +4731,194 @@ int dump_write_json( void )
     return 0;
 }
 
+
+int dump_write_mysql( void )
+{
+    struct tm *ltime;
+    struct AP_info *ap_cur;
+    struct ST_info *st_cur;
+    char * temp;
+
+    char db_timestamp[DB_TIMESTAMP_LEN];
+    char db_mac[DB_MAC_LEN];
+    char db_ssid[DB_SSID_LEN];
+    char db_rssi[DB_RSSI_LEN];
+    char db_vendor[DB_VENDOR_LEN];
+    char db_type[DB_TYPE_LEN];
+    char db_ap[DB_AP_LEN];
+    char db_meshid[DB_MESHID_LEN];    
+
+    if (! G.record_data || !G.output_format_mysql)
+        return 0;
+
+    //append AP info
+    ap_cur = G.ap_1st;
+    while( ap_cur != NULL )
+    {
+        // discard
+        if (time( NULL ) - ap_cur->tlast > G.berlin )
+        {
+            ap_cur = ap_cur->next;
+            continue;
+        }
+
+        if( memcmp( ap_cur->bssid, BROADCAST, 6 ) == 0 )
+        {
+            ap_cur = ap_cur->next;
+            continue;
+        }
+
+        if(ap_cur->security != 0 && G.f_encrypt != 0 && ((ap_cur->security & G.f_encrypt) == 0))
+        {
+            ap_cur = ap_cur->next;
+            continue;
+        }
+
+        if(is_filtered_essid(ap_cur->essid))
+        {
+            ap_cur = ap_cur->next;
+            continue;
+        }
+
+        //save Timestamp (last)
+        ltime = localtime( &ap_cur->tlast );
+        snprintf( db_timestamp, DB_TIMESTAMP_LEN, "%04d-%02d-%02d %02d:%02d:%02d",
+                 1900 + ltime->tm_year, 1 + ltime->tm_mon,
+                 ltime->tm_mday, ltime->tm_hour,
+                 ltime->tm_min,  ltime->tm_sec );
+        //save MAC
+        snprintf( db_mac, DB_MAC_LEN, "%02X:%02X:%02X:%02X:%02X:%02X",
+                 ap_cur->bssid[0], ap_cur->bssid[1],
+                 ap_cur->bssid[2], ap_cur->bssid[3],
+                 ap_cur->bssid[4], ap_cur->bssid[5] );        
+        //save SSID
+        temp = format_text_for_csv(ap_cur->essid, ap_cur->ssid_length);
+        snprintf( db_ssid, DB_SSID_LEN, "%s", temp );
+        free(temp);
+        //save RSSI
+        snprintf( db_rssi, DB_RSSI_LEN, "%3d", ap_cur->avg_power );
+        //save Vendor
+        if ( G.show_manufacturer)
+        {
+            snprintf(db_vendor, DB_VENDOR_LEN, "%s",ap_cur->manuf);
+        }
+        else
+        {
+            snprintf(db_vendor, DB_VENDOR_LEN, " ");
+        }
+        //save Type
+        snprintf(db_type, DB_TYPE_LEN, "A");
+
+        //save AP
+        snprintf(db_ap, DB_AP_LEN, " ");
+        //save Meshlium ID
+        snprintf(db_meshid, DB_MESHID_LEN, "test");
+
+        //insert into database
+        /* Execute the query */
+        char query_insert[DB_QUERY_LEN];
+        strcpy(query_insert, DB_QUERY);
+        replace(query_insert, "ID_TIMESTAMP", db_timestamp);
+        replace(query_insert, "ID_MAC", db_mac);
+        replace(query_insert, "ID_SSID", db_ssid);
+        replace(query_insert, "ID_RSSI", db_rssi);
+        replace(query_insert, "ID_VENDOR", db_vendor);
+        replace(query_insert, "ID_TYPE", db_type);
+        replace(query_insert, "ID_AP", db_ap);
+        replace(query_insert, "ID_MESHID", db_meshid);        
+        if (mysql_query(G.f_mysql, query_insert)) {
+            fprintf(stderr, "Error executing query \"%s\" in MySQL server: %s", query_insert, mysql_error(G.f_mysql));
+            ap_cur = ap_cur->next;
+            continue;
+        }
+
+        //move cursor to next AP        
+        ap_cur = ap_cur->next;
+    } // AP info
+
+    //append Station info
+    st_cur = G.st_1st;
+    while( st_cur != NULL )
+    {
+        ap_cur = st_cur->base;
+
+        // discard
+        if( ap_cur->nb_pkt < 2 )
+        {
+            st_cur = st_cur->next;
+            continue;
+        }
+                
+        if (time( NULL ) - st_cur->tlast > G.berlin )
+        {
+            st_cur = st_cur->next;
+            continue;
+        }
+
+        //save Timestamp (last)
+        ltime = localtime( &st_cur->tlast );
+        snprintf( db_timestamp, DB_TIMESTAMP_LEN, "%04d-%02d-%02d %02d:%02d:%02d",
+                 1900 + ltime->tm_year, 1 + ltime->tm_mon,
+                 ltime->tm_mday, ltime->tm_hour,
+                 ltime->tm_min,  ltime->tm_sec );
+        //save MAC
+        snprintf( db_mac, DB_MAC_LEN, "%02X:%02X:%02X:%02X:%02X:%02X",
+                 st_cur->stmac[0], st_cur->stmac[1],
+                 st_cur->stmac[2], st_cur->stmac[3],
+                 st_cur->stmac[4], st_cur->stmac[5] );
+        //save SSID
+        snprintf( db_ssid, DB_SSID_LEN, " " );
+        //save RSSI
+        snprintf( db_rssi, DB_RSSI_LEN, "%3d", st_cur->power );
+        //save Vendor
+        if ( G.show_manufacturer)
+        {
+            snprintf(db_vendor, DB_VENDOR_LEN, "%s",st_cur->manuf);
+        }
+        else
+        {
+            snprintf(db_vendor, DB_VENDOR_LEN, " ");
+        }
+        //save Type
+        snprintf(db_type, DB_TYPE_LEN, "C");
+
+        //save AP
+        if( ! memcmp( ap_cur->bssid, BROADCAST, 6 ) )
+            snprintf( db_ap, DB_AP_LEN, "(not associated)" );
+        else
+            snprintf( db_ap, DB_AP_LEN, "%02X:%02X:%02X:%02X:%02X:%02X",
+                     ap_cur->bssid[0], ap_cur->bssid[1],
+                     ap_cur->bssid[2], ap_cur->bssid[3],
+                     ap_cur->bssid[4], ap_cur->bssid[5] );
+
+        //save Meshlium ID
+        snprintf(db_meshid, DB_MESHID_LEN, "test");
+
+        //insert into database
+        /* Execute the query */
+        char query_insert[DB_QUERY_LEN];
+        strcpy(query_insert, DB_QUERY);
+        replace(query_insert, "ID_TIMESTAMP", db_timestamp);
+        replace(query_insert, "ID_MAC", db_mac);
+        replace(query_insert, "ID_SSID", db_ssid);
+        replace(query_insert, "ID_RSSI", db_rssi);
+        replace(query_insert, "ID_VENDOR", db_vendor);
+        replace(query_insert, "ID_TYPE", db_type);
+        replace(query_insert, "ID_AP", db_ap);
+        replace(query_insert, "ID_MESHID", db_meshid);        
+        if (mysql_query(G.f_mysql, query_insert)) {
+            fprintf(stderr, "Error executing query \"%s\" in MySQL server: %s", query_insert, mysql_error(G.f_mysql));
+            st_cur = st_cur->next;
+            continue;
+        }
+
+        
+        //move cursor to next station
+        st_cur = st_cur->next;
+    } // Station info
+    
+    return 0;
+}
 
 
 
@@ -7511,6 +7758,7 @@ int main(int argc, char * argv[])
 	G.f_ivs = NULL;
 	G.f_txt = NULL;
 	G.f_json = NULL;  
+	G.f_mysql = NULL;  
 	G.f_kis = NULL;
 	G.f_kis_xml = NULL;
 	G.f_gps = NULL;
@@ -7550,6 +7798,7 @@ int main(int argc, char * argv[])
 	G.output_format_pcap = 1;
 	G.output_format_csv = 1;
 	G.output_format_json = 1;  
+	G.output_format_mysql = 1;  
 	G.output_format_kismet_csv = 1;
 	G.output_format_kismet_netxml = 1;
 	G.output_format_log_csv = 1;
@@ -7853,7 +8102,8 @@ int main(int argc, char * argv[])
 
 					G.output_format_pcap = 0;
 					G.output_format_csv = 0;
-          G.output_format_json = 0;
+				        G.output_format_json = 0;
+				        G.output_format_mysql = 0;
 					G.output_format_kismet_csv = 0;
 					G.output_format_kismet_netxml = 0;
 					G.output_format_log_csv = 0;
@@ -8031,6 +8281,7 @@ int main(int argc, char * argv[])
 					G.output_format_pcap = 0;
 					G.output_format_csv = 0;
 					G.output_format_json = 0;          
+					G.output_format_mysql = 0;    
 					G.output_format_kismet_csv = 0;
 					G.output_format_kismet_netxml = 0;
 					G.output_format_log_csv = 0;
@@ -8049,6 +8300,8 @@ int main(int argc, char * argv[])
 						}
             else if (strncasecmp(output_format_string,"json",4) == 0){
                 G.output_format_json=1;
+						}            else if (strncasecmp(output_format_string,"mysql",4) == 0){
+                G.output_format_mysql=1;
 						}else if (strncasecmp(output_format_string, "pcap", 4)
                      == 0
 								 || strncasecmp(output_format_string, "cap", 3)
@@ -8122,6 +8375,7 @@ int main(int argc, char * argv[])
 							G.output_format_pcap = 1;
 							G.output_format_csv = 1;
 							G.output_format_json = 1;
+							G.output_format_mysql = 1;
 							G.output_format_kismet_csv = 1;
 							G.output_format_kismet_netxml = 1;
 						}
@@ -8131,6 +8385,7 @@ int main(int argc, char * argv[])
 							G.output_format_pcap = 0;
 							G.output_format_csv = 0;
 							G.output_format_json = 0;              
+							G.output_format_mysql = 0;              
 							G.output_format_kismet_csv = 0;
 							G.output_format_kismet_netxml = 0;
 							G.output_format_log_csv = 0;
@@ -8504,6 +8759,7 @@ int main(int argc, char * argv[])
 			tt1 = time(NULL);
 			if (G.output_format_csv) dump_write_csv();
 			if (G.output_format_json) dump_write_json();      
+			if (G.output_format_mysql) dump_write_mysql();      
 			if (G.output_format_kismet_csv) dump_write_kismet_csv();
 			if (G.output_format_kismet_netxml) dump_write_kismet_netxml();
 		}
@@ -8824,11 +9080,13 @@ int main(int argc, char * argv[])
 	{
 		if (G.output_format_csv) dump_write_csv();
 		if (G.output_format_json) dump_write_json();    
+		if (G.output_format_json) dump_write_mysql();    
 		if (G.output_format_kismet_csv) dump_write_kismet_csv();
 		if (G.output_format_kismet_netxml) dump_write_kismet_netxml();
 
 		if (G.output_format_csv || G.f_txt != NULL) fclose(G.f_txt);
     if (G.output_format_json|| G.f_json!= NULL ) fclose( G.f_json);    
+    if (G.output_format_mysql|| G.f_mysql!= NULL ) G.f_mysql = NULL;
 		if (G.output_format_kismet_csv || G.f_kis != NULL) fclose(G.f_kis);
 		if (G.output_format_kismet_netxml || G.f_kis_xml != NULL)
 		{

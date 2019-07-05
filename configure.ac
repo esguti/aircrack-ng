@@ -104,6 +104,7 @@ AIRCRACK_NG_PCAP
 AIRCRACK_NG_PCRE
 AIRCRACK_NG_RFKILL
 AIRCRACK_NG_SQLITE
+AIRCRACK_NG_MYSQL
 AIRCRACK_NG_ZLIB
 PKG_CHECK_MODULES([CMOCKA], [cmocka], [
 		CMOCKA_FOUND=yes
@@ -262,6 +263,7 @@ ${PACKAGE} ${VERSION}
     Pcap:                        ${PCAP_FOUND}
     Pcre:                        ${HAVE_PCRE}
     Sqlite:                      ${HAVE_SQLITE3}
+    MySQL:                       ${HAVE_MYSQL}    
     Tcmalloc:                    ${TCMALLOC}
     Zlib:                        ${HAVE_ZLIB}
 

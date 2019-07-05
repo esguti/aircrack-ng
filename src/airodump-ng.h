@@ -33,6 +33,7 @@
 #define _AIRODUMP_NG_H_
 
 #include "eapol.h"
+#include <mysql.h>
 
 /* some constants */
 
@@ -98,25 +99,43 @@
 // milliseconds to store last packets
 #define BUFFER_TIME 3000
 
+#define DB_TIMESTAMP_LEN 20
+#define DB_MAC_LEN 18
+#define DB_SSID_LEN 33
+#define DB_RSSI_LEN 5
+#define DB_VENDOR_LEN 151
+#define DB_TYPE_LEN 11
+#define DB_AP_LEN 18
+#define DB_MESHID_LEN 151
+#define DB_QUERY_LEN 1024
+#define DB_QUERY "INSERT INTO MeshliumDB.wifiScan (TimeStamp, MAC, SSID, RSSI, Vendor, Type, AP, MeshliumID) VALUES ('ID_TIMESTAMP', 'ID_MAC', 'ID_SSID', 'ID_RSSI', 'ID_VENDOR', 'ID_TYPE', 'ID_AP', 'ID_MESHID')\0"
+#define DB_HOST "127.0.0.1"
+#define DB_USER "root"
+#define DB_PASS "libelium2007"
+#define DB_NAME "MeshliumDB"
+#define DB_PORT 3306
+
 extern int get_ram_size(void);
 char *
 get_manufacturer(unsigned char mac0, unsigned char mac1, unsigned char mac2);
 
 #define AIRODUMP_NG_CSV_EXT "csv"
 #define AIRODUMP_NG_JSON_EXT "json"
+#define AIRODUMP_NG_MYSQL_EXT "mysql"
 #define KISMET_CSV_EXT "kismet.csv"
 #define KISMET_NETXML_EXT "kismet.netxml"
 #define AIRODUMP_NG_GPS_EXT "gps"
 #define AIRODUMP_NG_CAP_EXT "cap"
 #define AIRODUMP_NG_LOG_CSV_EXT "log.csv"
 
-#define NB_EXTENSIONS 8
+#define NB_EXTENSIONS 9
 
 const unsigned char llcnull[4] = {0, 0, 0, 0};
 char * f_ext[NB_EXTENSIONS] = {AIRODUMP_NG_CSV_EXT,
 							   AIRODUMP_NG_GPS_EXT,
 							   AIRODUMP_NG_CAP_EXT,
                  AIRODUMP_NG_JSON_EXT,                               
+                 AIRODUMP_NG_MYSQL_EXT,                               
 							   IVS2_EXTENSION,
 							   KISMET_CSV_EXT,
 							   KISMET_NETXML_EXT,
@@ -382,6 +401,7 @@ struct globals
 	int f_index; /* outfiles index       */
 	FILE * f_txt; /* output csv file      */
 	FILE * f_json; /* output json file      */
+	MYSQL * f_mysql; /* output mysql file      */
   FILE * f_kis; /* output kismet csv file      */
 	FILE * f_kis_xml; /* output kismet netxml file */
 	FILE * f_gps; /* output gps file      */
@@ -493,6 +513,7 @@ struct globals
 	int output_format_pcap;
 	int output_format_csv;
   int output_format_json;    
+  int output_format_mysql;    
 	int output_format_kismet_csv;
 	int output_format_kismet_netxml;
 	int output_format_log_csv;
