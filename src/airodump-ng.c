@@ -1121,6 +1121,10 @@ static int dump_initialize(char * prefix, int ivs_only)
           return (1);
       }
 
+      // set to reconnect automatically
+      my_bool reconnect = 1;
+      mysql_options(G.f_mysql, MYSQL_OPT_RECONNECT, &reconnect);
+      
       /* Connect to the server */
       if (!mysql_real_connect(G.f_mysql, DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT, NULL, 0)) {
           fprintf(stderr, "Could not connect to MySQL server: %s\n", mysql_error(G.f_mysql));
@@ -4812,7 +4816,7 @@ int dump_write_mysql( void )
         //save AP
         snprintf(db_ap, DB_AP_LEN, " ");
         //save Meshlium ID
-        snprintf(db_meshid, DB_MESHID_LEN, "test");
+        snprintf(db_meshid, DB_MESHID_LEN, G.prefix);
 
         //insert into database
         /* Execute the query */
@@ -4826,7 +4830,7 @@ int dump_write_mysql( void )
         replace(query_insert, "ID_TYPE", db_type);
         replace(query_insert, "ID_AP", db_ap);
         replace(query_insert, "ID_MESHID", db_meshid);        
-        if (mysql_query(G.f_mysql, query_insert)) {
+        if ( mysql_ping(G.f_mysql) || mysql_query(G.f_mysql, query_insert)) {
             fprintf(stderr, "Error executing query \"%s\" in MySQL server: %s", query_insert, mysql_error(G.f_mysql));
             ap_cur = ap_cur->next;
             continue;
@@ -4892,7 +4896,7 @@ int dump_write_mysql( void )
                      ap_cur->bssid[4], ap_cur->bssid[5] );
 
         //save Meshlium ID
-        snprintf(db_meshid, DB_MESHID_LEN, "test");
+        snprintf(db_meshid, DB_MESHID_LEN, G.prefix);
 
         //insert into database
         /* Execute the query */
@@ -4906,7 +4910,7 @@ int dump_write_mysql( void )
         replace(query_insert, "ID_TYPE", db_type);
         replace(query_insert, "ID_AP", db_ap);
         replace(query_insert, "ID_MESHID", db_meshid);        
-        if (mysql_query(G.f_mysql, query_insert)) {
+        if ( mysql_ping(G.f_mysql) || mysql_query(G.f_mysql, query_insert) ) {
             fprintf(stderr, "Error executing query \"%s\" in MySQL server: %s", query_insert, mysql_error(G.f_mysql));
             st_cur = st_cur->next;
             continue;
@@ -7630,6 +7634,96 @@ static int rearrange_frequencies(void)
 	return 0;
 }
 
+
+void free_packets(void){
+    struct AP_info *ap_cur, *ap_prv, *ap_next;
+    struct ST_info *st_cur, *st_next;
+    struct NA_info *na_cur, *na_next;
+    struct oui *oui_cur, *oui_next;
+
+
+    // Free APs
+  	ap_prv = NULL;
+    ap_cur = G.ap_1st;
+
+    while (ap_cur != NULL)
+    {
+        // Clean content of ap_cur list (first element: G.ap_1st)
+        uniqueiv_wipe(ap_cur->uiv_root);
+
+        list_tail_free(&(ap_cur->packets));
+
+        if (G.manufList) free(ap_cur->manuf);
+
+        if (G.detect_anomaly) data_wipe(ap_cur->data_root);
+
+        ap_prv = ap_cur;
+        ap_cur = ap_cur->next;
+    }
+
+    ap_cur = G.ap_1st;
+
+    while (ap_cur != NULL)
+    {
+        // Freeing AP List
+        ap_next = ap_cur->next;
+        free(ap_cur);
+        ap_cur = ap_next;
+    }
+
+    G.ap_1st = NULL;
+    G.ap_end = NULL;
+
+    
+    // Free Stations
+    st_cur = G.st_1st;
+    st_next = NULL;
+
+    while (st_cur != NULL)
+    {
+        st_next = st_cur->next;
+        if (G.manufList) free(st_cur->manuf);
+        free(st_cur);
+        st_cur = st_next;
+    }
+    G.st_1st = NULL;
+    G.st_end = NULL;    
+
+    
+    // Free NAs
+    na_cur = G.na_1st;
+    na_next = NULL;
+
+    while (na_cur != NULL)
+    {
+        na_next = na_cur->next;
+        free(na_cur);
+        na_cur = na_next;
+    }
+    G.na_1st = NULL;
+    G.na_end = NULL;
+
+    
+    // Free Manuf
+    if (G.manufList)
+    {
+        oui_cur = G.manufList;
+        while (oui_cur != NULL)
+        {
+            oui_next = oui_cur->next;
+            free(oui_cur);
+            oui_cur = oui_next;
+        }
+
+        G.manufList = NULL;
+    }
+
+
+    read_pkts = 0;
+}
+
+
+
 int main(int argc, char * argv[])
 {
 	long time_slept, cycle_time, cycle_time2;
@@ -7650,11 +7744,6 @@ int main(int argc, char * argv[])
 	const char * pcreerror;
 	int pcreerroffset;
 #endif
-
-	struct AP_info *ap_cur, *ap_prv, *ap_next;
-	struct ST_info *st_cur, *st_next;
-	struct NA_info *na_cur, *na_next;
-	struct oui *oui_cur, *oui_next;
 
 	struct pcap_pkthdr pkh;
 
@@ -8762,6 +8851,9 @@ int main(int argc, char * argv[])
 			if (G.output_format_mysql) dump_write_mysql();      
 			if (G.output_format_kismet_csv) dump_write_kismet_csv();
 			if (G.output_format_kismet_netxml) dump_write_kismet_netxml();
+
+      // free_packets();
+
 		}
 
 		if (time(NULL) - tt2 > 5)
@@ -9105,66 +9197,8 @@ int main(int argc, char * argv[])
 		unlink((char *) buffer);
 	}
 
-	ap_prv = NULL;
-	ap_cur = G.ap_1st;
-
-	while (ap_cur != NULL)
-	{
-		// Clean content of ap_cur list (first element: G.ap_1st)
-		uniqueiv_wipe(ap_cur->uiv_root);
-
-		list_tail_free(&(ap_cur->packets));
-
-		if (G.manufList) free(ap_cur->manuf);
-
-		if (G.detect_anomaly) data_wipe(ap_cur->data_root);
-
-		ap_prv = ap_cur;
-		ap_cur = ap_cur->next;
-	}
-
-	ap_cur = G.ap_1st;
-
-	while (ap_cur != NULL)
-	{
-		// Freeing AP List
-		ap_next = ap_cur->next;
-		free(ap_cur);
-		ap_cur = ap_next;
-	}
-
-	st_cur = G.st_1st;
-	st_next = NULL;
-
-	while (st_cur != NULL)
-	{
-		st_next = st_cur->next;
-		if (G.manufList) free(st_cur->manuf);
-		free(st_cur);
-		st_cur = st_next;
-	}
-
-	na_cur = G.na_1st;
-	na_next = NULL;
-
-	while (na_cur != NULL)
-	{
-		na_next = na_cur->next;
-		free(na_cur);
-		na_cur = na_next;
-	}
-
-	if (G.manufList)
-	{
-		oui_cur = G.manufList;
-		while (oui_cur != NULL)
-		{
-			oui_next = oui_cur->next;
-			free(oui_cur);
-			oui_cur = oui_next;
-		}
-	}
-
+  free_packets();
+  
 	show_cursor();
 
 	return (0);
