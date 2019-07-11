@@ -125,8 +125,8 @@ endif
 MYSQL_CONFIG = ../lib/mysql-connector-c-6.1.9-linux-glibc2.5-x86_64/bin/mysql_config
 MYSQL_CFLAGS = `$(MYSQL_CONFIG) --cflags`
 MYSQL_LIBPATH = `$(MYSQL_CONFIG) --libs`
-MYSQL_LIBNAME = -L/mnt/user/aircrack-ng-last/lib/mysql-connector-c-6.1.9-linux-glibc2.5-x86_64/lib -lmysqlclient
-MYSQL_LIBS = $(MYSQL_LIBNAME)
+# MYSQL_LIBNAME = -L/mnt/user/aircrack-ng-mod/lib/mysql-connector-c-6.1.9-linux-glibc2.5-x86_64/lib -lmysqlclient
+MYSQL_LIBS = -L/mnt/user/aircrack-ng-mod/lib/mysql-connector-c-6.1.9-linux-glibc2.5-x86_64/lib -lmysqlclient
 
 
 COMMON_CFLAGS = $(LIBAC_CFLAGS) $(PTHREAD_CFLAGS) $(CRYPTO_CFLAGS) $(ZLIB_CFLAGS)
